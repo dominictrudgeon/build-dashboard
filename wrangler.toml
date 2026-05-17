@@ -1,0 +1,21 @@
+name = "build-push"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cron trigger — runs every 5 minutes
+# This gives 5-min granularity for reminder firing
+[triggers]
+crons = ["*/5 * * * *"]
+
+# KV namespace binding
+# Create with: wrangler kv:namespace create SUBSCRIPTIONS
+# Then paste the returned id below.
+[[kv_namespaces]]
+binding = "SUBSCRIPTIONS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Environment vars (non-secret)
+# Set APP_ORIGIN to your Cloudflare Pages URL, e.g. https://build-dashboard.pages.dev
+[vars]
+APP_ORIGIN = "https://build-dashboard.pages.dev"

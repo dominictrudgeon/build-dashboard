@@ -14,7 +14,7 @@
 //
 // CORS: allows the app's origin (set via APP_ORIGIN env var).
 // =============================================================================
-
+ 
 // ---- CORS helpers ----
 function corsHeaders(req, env) {
   const origin = req.headers.get('Origin') || '';
@@ -34,7 +34,7 @@ function json(body, status, req, env) {
     headers: {'Content-Type': 'application/json', ...corsHeaders(req, env)}
   });
 }
-
+ 
 // ---- Base64 url helpers ----
 function b64urlToBytes(s) {
   s = s.replace(/-/g, '+').replace(/_/g, '/');
@@ -58,7 +58,7 @@ function concatBytes(...arrs) {
   for (const a of arrs) { out.set(a, off); off += a.length; }
   return out;
 }
-
+ 
 // ---- VAPID JWT (ES256) ----
 async function importVapidPrivate(b64) {
   // Private key is 32 bytes, but JWK import wants both d, x, y
@@ -70,7 +70,7 @@ async function importVapidPrivate(b64) {
   // For simplicity, require JWK format. Throw helpful error if raw is provided.
   throw new Error('VAPID_PRIVATE_KEY must be JWK JSON format. Run scripts/gen-vapid.mjs to generate.');
 }
-
+ 
 async function vapidJWT(endpoint, env) {
   const url = new URL(endpoint);
   const aud = `${url.protocol}//${url.host}`;
@@ -88,7 +88,7 @@ async function vapidJWT(endpoint, env) {
   const sig = new Uint8Array(sigBuf);
   return `${signingInput}.${bytesToB64url(sig)}`;
 }
-
+ 
 // ---- Web push payload encryption (RFC 8291, aes128gcm content encoding) ----
 // Steps:
 //   1. Generate ephemeral ECDH P-256 keypair (server)
@@ -113,18 +113,18 @@ async function hkdfExtract(salt, ikm) {
   const sig = await crypto.subtle.sign('HMAC', key, ikm);
   return new Uint8Array(sig);
 }
-
+ 
 async function encryptPayload(payloadBytes, subscription) {
   const uaPublic = b64urlToBytes(subscription.keys.p256dh);
   const authSecret = b64urlToBytes(subscription.keys.auth);
-
+ 
   // Ephemeral ECDH keypair
   const ephKeyPair = await crypto.subtle.generateKey(
     {name: 'ECDH', namedCurve: 'P-256'}, true, ['deriveBits']
   );
   // Export server public as raw (65 bytes uncompressed point: 0x04 || X || Y)
   const serverPublicRaw = new Uint8Array(await crypto.subtle.exportKey('raw', ephKeyPair.publicKey));
-
+ 
   // Import UA public key
   const uaPubKey = await crypto.subtle.importKey(
     'raw', uaPublic, {name: 'ECDH', namedCurve: 'P-256'}, false, []
@@ -133,23 +133,23 @@ async function encryptPayload(payloadBytes, subscription) {
   const ikm = new Uint8Array(await crypto.subtle.deriveBits(
     {name: 'ECDH', public: uaPubKey}, ephKeyPair.privateKey, 256
   ));
-
+ 
   // PRK_key = HMAC-SHA256(auth_secret, ikm)
   const prkKey = await hkdfExtract(authSecret, ikm);
   // info1 = "WebPush: info\x00" || ua_public || server_public
   const info1 = concatBytes(strToBytes('WebPush: info\0'), uaPublic, serverPublicRaw);
   const ikm2 = await hkdfExpand(prkKey, info1, 32);
-
+ 
   // Random salt (16 bytes)
   const salt = crypto.getRandomValues(new Uint8Array(16));
   // PRK = HMAC-SHA256(salt, ikm2)
   const prk = await hkdfExtract(salt, ikm2);
-
+ 
   // CEK = HKDF-Expand(prk, "Content-Encoding: aes128gcm\0", 16)
   const cek = await hkdfExpand(prk, strToBytes('Content-Encoding: aes128gcm\0'), 16);
   // NONCE = HKDF-Expand(prk, "Content-Encoding: nonce\0", 12)
   const nonce = await hkdfExpand(prk, strToBytes('Content-Encoding: nonce\0'), 12);
-
+ 
   // Plaintext: payload || 0x02 (delimiter, no padding)
   const plaintext = concatBytes(payloadBytes, new Uint8Array([0x02]));
   // Encrypt
@@ -157,7 +157,7 @@ async function encryptPayload(payloadBytes, subscription) {
   const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
     {name: 'AES-GCM', iv: nonce}, aesKey, plaintext
   ));
-
+ 
   // Body framing: salt(16) || rs(4, BE uint32) || idlen(1) || keyid(idlen) || ciphertext
   const rs = new Uint8Array(4);
   // Record size = 4096 (just a recommendation; needs > body size)
@@ -166,7 +166,7 @@ async function encryptPayload(payloadBytes, subscription) {
   const body = concatBytes(salt, rs, idlen, serverPublicRaw, ciphertext);
   return body;
 }
-
+ 
 // ---- Send one push ----
 async function sendPush(subscription, payload, env) {
   const payloadBytes = strToBytes(typeof payload === 'string' ? payload : JSON.stringify(payload));
@@ -182,7 +182,7 @@ async function sendPush(subscription, payload, env) {
   const resp = await fetch(subscription.endpoint, {method: 'POST', headers, body});
   return resp;
 }
-
+ 
 // ---- Reminder scheduling ----
 // Each subscription stores: {endpoint, keys, prefs: {tz, morning, prePm, preAm, postWorkout, evening}}
 // Cron tick: figure out user-local time from prefs.tz, fire any reminder whose minute matches.
@@ -197,7 +197,7 @@ function isWithinWindow(target, now, windowMin) {
   const nMin = now.hours * 60 + now.minutes;
   return Math.abs(tMin - nMin) <= windowMin;
 }
-
+ 
 async function scanAndSendReminders(env) {
   // List all subscription keys
   const list = await env.SUBSCRIPTIONS.list({prefix: 'sub:'});
@@ -248,7 +248,7 @@ async function scanAndSendReminders(env) {
     if (prefs.evening?.enabled && isWithinWindow(prefs.evening, local, 5)) {
       reminders.push({title: '🌙 Evening review', body: 'Quick check: macros, hydration, tomorrow\'s session prep.', tag: 'evening', url: './'});
     }
-
+ 
     // Send each
     for (const r of reminders) {
       try {
@@ -269,13 +269,31 @@ async function scanAndSendReminders(env) {
   }
   return {sent, failed, scanned: list.keys.length};
 }
-
+ 
 // ---- Subscription key derivation ----
 async function subscriptionKey(endpoint) {
   const buf = await crypto.subtle.digest('SHA-256', strToBytes(endpoint));
   return 'sub:' + bytesToB64url(new Uint8Array(buf)).slice(0, 24);
 }
-
+ 
+// ---- Sync auth check ----
+function checkSyncAuth(req, env) {
+  // If SYNC_SECRET is not set, skip auth (insecure mode)
+  if (!env.SYNC_SECRET) return {ok: true};
+  const auth = req.headers.get('Authorization') || '';
+  const expected = `Bearer ${env.SYNC_SECRET}`;
+  if (auth !== expected) return {ok: false, error: 'unauthorized'};
+  return {ok: true};
+}
+ 
+// ---- Sync key derivation (one slot per shared-secret) ----
+async function syncKey(env) {
+  // Derive a stable key per-secret. If no secret, all users share "default" — bad, but they opted in.
+  if (!env.SYNC_SECRET) return 'sync:default';
+  const buf = await crypto.subtle.digest('SHA-256', strToBytes(env.SYNC_SECRET));
+  return 'sync:' + bytesToB64url(new Uint8Array(buf)).slice(0, 24);
+}
+ 
 // ---- Request handler ----
 export default {
   async fetch(req, env) {
@@ -283,11 +301,55 @@ export default {
     if (req.method === 'OPTIONS') {
       return new Response(null, {headers: corsHeaders(req, env)});
     }
-
+ 
     if (req.method === 'GET' && url.pathname === '/vapid-public') {
       return json({vapidPublic: env.VAPID_PUBLIC_KEY}, 200, req, env);
     }
-
+ 
+    // ---- Sync endpoints ----
+    if (url.pathname.startsWith('/sync/')) {
+      const auth = checkSyncAuth(req, env);
+      if (!auth.ok) return json({error: auth.error}, 401, req, env);
+      const skey = await syncKey(env);
+ 
+      if (req.method === 'POST' && url.pathname === '/sync/push') {
+        // Body: {state: {...}, updatedAt: <ms>}
+        const body = await req.json().catch(() => null);
+        if (!body || typeof body.state !== 'object') return json({error: 'state required'}, 400, req, env);
+        const payload = {
+          state: body.state,
+          updatedAt: body.updatedAt || Date.now(),
+          source: body.source || 'unknown'
+        };
+        // Check size — KV value limit is 25MB but we cap at 5MB to be safe
+        const serialized = JSON.stringify(payload);
+        if (serialized.length > 5_000_000) return json({error: 'payload too large'}, 413, req, env);
+        await env.SUBSCRIPTIONS.put(skey, serialized);
+        return json({ok: true, updatedAt: payload.updatedAt, size: serialized.length}, 200, req, env);
+      }
+ 
+      if (req.method === 'GET' && url.pathname === '/sync/pull') {
+        const raw = await env.SUBSCRIPTIONS.get(skey);
+        if (!raw) return json({state: null, updatedAt: 0}, 200, req, env);
+        const data = JSON.parse(raw);
+        return json(data, 200, req, env);
+      }
+ 
+      if (req.method === 'GET' && url.pathname === '/sync/status') {
+        const raw = await env.SUBSCRIPTIONS.get(skey);
+        if (!raw) return json({exists: false}, 200, req, env);
+        const data = JSON.parse(raw);
+        return json({exists: true, updatedAt: data.updatedAt, source: data.source, size: raw.length}, 200, req, env);
+      }
+ 
+      if (req.method === 'DELETE' && url.pathname === '/sync/clear') {
+        await env.SUBSCRIPTIONS.delete(skey);
+        return json({ok: true}, 200, req, env);
+      }
+ 
+      return json({error: 'unknown sync endpoint'}, 404, req, env);
+    }
+ 
     if (req.method === 'POST' && url.pathname === '/subscribe') {
       const body = await req.json().catch(() => null);
       if (!body || !body.subscription?.endpoint) return json({error: 'subscription required'}, 400, req, env);
@@ -301,7 +363,7 @@ export default {
       await env.SUBSCRIPTIONS.put(key, JSON.stringify(entry));
       return json({ok: true, id: key}, 200, req, env);
     }
-
+ 
     if (req.method === 'POST' && url.pathname === '/preferences') {
       const body = await req.json().catch(() => null);
       if (!body?.endpoint || !body?.prefs) return json({error: 'endpoint+prefs required'}, 400, req, env);
@@ -313,7 +375,7 @@ export default {
       await env.SUBSCRIPTIONS.put(key, JSON.stringify(entry));
       return json({ok: true}, 200, req, env);
     }
-
+ 
     if ((req.method === 'POST' || req.method === 'DELETE') && url.pathname === '/unsubscribe') {
       const body = await req.json().catch(() => null);
       if (!body?.endpoint) return json({error: 'endpoint required'}, 400, req, env);
@@ -321,7 +383,7 @@ export default {
       await env.SUBSCRIPTIONS.delete(key);
       return json({ok: true}, 200, req, env);
     }
-
+ 
     if (req.method === 'POST' && url.pathname === '/test') {
       const body = await req.json().catch(() => null);
       if (!body?.endpoint) return json({error: 'endpoint required'}, 400, req, env);
@@ -332,7 +394,7 @@ export default {
       try {
         const resp = await sendPush(
           {endpoint: entry.endpoint, keys: entry.keys},
-          {title: '✅ Build push working', body: 'Notifications are live.', tag: 'test'},
+          {title: '✅ Build push working', body: `Notifications are live. ${new Date().toLocaleTimeString()}`, tag: 'test-' + Date.now(), requireInteraction: true},
           env
         );
         return json({ok: resp.ok || resp.status === 201, status: resp.status}, 200, req, env);
@@ -340,11 +402,12 @@ export default {
         return json({error: e.message, stack: e.stack?.slice(0, 500)}, 500, req, env);
       }
     }
-
-    return json({service: 'build-push', endpoints: ['/subscribe', '/preferences', '/unsubscribe', '/test', '/vapid-public']}, 200, req, env);
+ 
+    return json({service: 'build-push', endpoints: ['/subscribe', '/preferences', '/unsubscribe', '/test', '/vapid-public', '/sync/push', '/sync/pull', '/sync/status', '/sync/clear']}, 200, req, env);
   },
-
+ 
   async scheduled(event, env, ctx) {
     ctx.waitUntil(scanAndSendReminders(env).then(r => console.log('Reminder scan', r)));
   }
 };
+ 
